@@ -13,7 +13,14 @@ For a future network with bigger blocks.
   :Language: Python (>= 3.6)
   :Author: Neil Booth
 
+Getting Started
+===============
+
+See `docs/HOWTO.rst`_.
+
 Documentation
 =============
 
 See `readthedocs <https://electrumx.readthedocs.io/>`_.
+
+.. _docs/HOWTO.rst: https://github.com/sn-ntu/electrumx/blob/master/docs/HOWTO.rst

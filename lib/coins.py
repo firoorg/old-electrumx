@@ -514,6 +514,50 @@ class BitcoinGoldRegtest(BitcoinGold):
                     'bf5beb436012afca590b1a11466e2206')
 
 
+class Bitcoin(Coin):
+    NAME = "Bitcoin"
+    SHORTNAME = "BTC"
+    NET = "mainnet"
+    XPUB_VERBYTES = bytes.fromhex("0488b21e")
+    XPRV_VERBYTES = bytes.fromhex("0488ade4")
+    P2PKH_VERBYTE = bytes.fromhex("00")
+    P2SH_VERBYTES = [bytes.fromhex("05")]
+    WIF_BYTE = bytes.fromhex("80")
+    GENESIS_HASH = ('000000000019d6689c085ae165831e93'
+                    '4ff763ae46a2a6c172b3f1b60a8ce26f')
+    TX_COUNT = 217380620
+    TX_COUNT_HEIGHT = 464000
+    TX_PER_BLOCK = 1800
+    RPC_PORT = 8332
+    PEERS = [
+        'electroncash.bitcoinplug.com s t',
+        'electrum-abc.criptolayer.net s50012',
+        'electroncash.cascharia.com s50002',
+        'bcc.arihanc.com t52001 s52002',
+        'mash.1209l.com s t',
+        'bch.kokx.org s t',
+        'abc.vom-stausee.de t52001 s52002',
+        'abc1.hsmiths.com t60001 s60002',
+    ]
+
+
+class Zcoin(Coin):
+    NAME = "Zcoin"
+    SHORTNAME = "XZC"
+    NET = "mainnet"
+    P2PKH_VERBYTE = bytes.fromhex("52")
+    P2SH_VERBYTES = [bytes.fromhex("07")]
+    WIF_BYTE = bytes.fromhex("d2")
+    GENESIS_HASH = ('4381deb85b1b2c9843c222944b616d99'
+                    '7516dcbd6a964e1eaf0def0830695233')
+    TX_COUNT = 1
+    TX_COUNT_HEIGHT = 1
+    TX_PER_BLOCK = 1
+    IRC_PREFIX = None
+    RPC_PORT = 8888
+    REORG_LIMIT = 5000
+
+
 class Emercoin(Coin):
     NAME = "Emercoin"
     SHORTNAME = "EMC"
