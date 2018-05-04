@@ -23,4 +23,4 @@ Documentation
 
 See `readthedocs <https://electrumx.readthedocs.io/>`_.
 
-.. _docs/HOWTO.rst: https://github.com/sn-ntu/electrumx/blob/master/docs/HOWTO.rst
+.. _docs/HOWTO.rst: https://github.com/zcoinofficial/electrumx/blob/master/docs/HOWTO.rst
