@@ -35,6 +35,7 @@ _sha256 = hashlib.sha256
 _sha512 = hashlib.sha512
 _new_hash = hashlib.new
 _new_hmac = hmac.new
+HASHX_LEN = 11
 
 
 def sha256(x):
@@ -73,8 +74,9 @@ def hash_to_hex_str(x):
     '''
     return bytes(reversed(x)).hex()
 
-# Temporary
-hash_to_str = hash_to_hex_str
+
+hash_to_str = hash_to_hex_str   # Temporary
+
 
 def hex_str_to_hash(x):
     '''Convert a displayed hex string to a binary hash.'''

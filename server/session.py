@@ -1,4 +1,4 @@
-# Copyright (c) 2016-2017, Neil Booth
+# Copyright (c) 2016-2018, Neil Booth
 #
 # All rights reserved.
 #
@@ -10,6 +10,7 @@
 import codecs
 import itertools
 import time
+import datetime
 from functools import partial
 
 from aiorpcx import ServerSession, JSONRPCAutoDetect, RPCError
@@ -135,7 +136,6 @@ class ElectrumX(SessionBase):
         super().__init__(*args, **kwargs)
         self.subscribe_headers = False
         self.subscribe_headers_raw = False
-        self.subscribe_height = False
         self.notified_height = None
         self.max_response_size = self.env.max_send
         self.max_subs = self.env.max_session_subs
@@ -193,9 +193,6 @@ class ElectrumX(SessionBase):
             if self.subscribe_headers:
                 args = (self.subscribe_headers_result(height), )
                 self.send_notification('blockchain.headers.subscribe', args)
-            if self.subscribe_height:
-                args = (height, )
-                self.send_notification('blockchain.numblocks.subscribe', args)
 
         our_touched = touched.intersection(self.hashX_subs)
         if our_touched or (height_changed and self.mempool_statuses):
@@ -226,11 +223,6 @@ class ElectrumX(SessionBase):
         self.subscribe_headers_raw = self.assert_boolean(raw)
         self.notified_height = self.height()
         return self.subscribe_headers_result(self.height())
-
-    def numblocks_subscribe(self):
-        '''Subscribe to get height of new blocks.'''
-        self.subscribe_height = True
-        return self.height()
 
     async def add_peer(self, features):
         '''Add a peer (but only if the peer resolves to the source).'''
@@ -302,7 +294,7 @@ class ElectrumX(SessionBase):
         start_height = self.controller.non_negative_integer(start_height)
         count = self.controller.non_negative_integer(count)
         count = min(count, self.MAX_CHUNK_SIZE)
-        hex_str, n =  self.controller.block_headers(start_height, count)
+        hex_str, n = self.controller.block_headers(start_height, count)
         return {'hex': hex_str, 'count': n, 'max': self.MAX_CHUNK_SIZE}
 
     def block_get_chunk(self, index):
@@ -312,7 +304,7 @@ class ElectrumX(SessionBase):
         index = self.controller.non_negative_integer(index)
         chunk_size = self.controller.coin.CHUNK_SIZE
         start_height = index * chunk_size
-        hex_str, n =  self.controller.block_headers(start_height, chunk_size)
+        hex_str, n = self.controller.block_headers(start_height, chunk_size)
         return hex_str
 
     def is_tor(self):
@@ -358,7 +350,7 @@ class ElectrumX(SessionBase):
                 with codecs.open(banner_file, 'r', 'utf-8') as f:
                     banner = f.read()
             except Exception as e:
-                self.loggererror(f'reading banner file {banner_file}: {e}')
+                self.logger.error(f'reading banner file {banner_file}: {e}')
             else:
                 banner = await self.replaced_banner(banner)
 
@@ -393,8 +385,7 @@ class ElectrumX(SessionBase):
         # that protocol version in unsupported.
         ptuple = self.controller.protocol_tuple(protocol_version)
 
-        # From protocol version 1.1, protocol_version cannot be omitted
-        if ptuple is None or (ptuple >= (1, 1) and protocol_version is None):
+        if ptuple is None:
             self.logger.info('unsupported protocol version request {}'
                              .format(protocol_version))
             self.close_after_send = True
@@ -403,11 +394,7 @@ class ElectrumX(SessionBase):
 
         self.set_protocol_handlers(ptuple)
 
-        # The return value depends on the protocol version
-        if ptuple < (1, 1):
-            return self.controller.VERSION
-        else:
-            return (self.controller.VERSION, self.protocol_version)
+        return (self.controller.VERSION, self.protocol_version)
 
     async def transaction_broadcast(self, raw_tx):
         '''Broadcast a raw transaction to the network.
@@ -427,27 +414,6 @@ class ElectrumX(SessionBase):
             raise RPCError(BAD_REQUEST, 'the transaction was rejected by '
                            f'network rules.\n\n{message}\n[{raw_tx}]')
 
-    async def transaction_broadcast_1_0(self, raw_tx):
-        '''Broadcast a raw transaction to the network.
-
-        raw_tx: the raw transaction as a hexadecimal string'''
-        # An ugly API: current Electrum clients only pass the raw
-        # transaction in hex and expect error messages to be returned in
-        # the result field.  And the server shouldn't be doing the client's
-        # user interface job here.
-        try:
-            return await self.transaction_broadcast(raw_tx)
-        except RPCError as e:
-            message = e.message
-            if 'non-mandatory-script-verify-flag' in message:
-                message = (
-                    'Your client produced a transaction that is not accepted '
-                    'by the network any more.  Please upgrade to Electrum '
-                    '2.5.1 or newer.'
-                )
-
-            return message
-
     def set_protocol_handlers(self, ptuple):
         protocol_version = '.'.join(str(part) for part in ptuple)
         if protocol_version == self.protocol_version:
@@ -466,6 +432,17 @@ class ElectrumX(SessionBase):
             'blockchain.estimatefee': controller.estimatefee,
             'blockchain.headers.subscribe': self.headers_subscribe,
             'blockchain.relayfee': controller.relayfee,
+            'blockchain.scripthash.get_balance':
+            controller.scripthash_get_balance,
+            'blockchain.scripthash.get_history':
+            controller.scripthash_get_history,
+            'blockchain.scripthash.get_mempool':
+            controller.scripthash_get_mempool,
+            'blockchain.scripthash.listunspent':
+            controller.scripthash_listunspent,
+            'blockchain.scripthash.subscribe': self.scripthash_subscribe,
+            'blockchain.transaction.broadcast': self.transaction_broadcast,
+            'blockchain.transaction.get': controller.transaction_get,
             'blockchain.transaction.get_merkle':
             controller.transaction_get_merkle,
             'server.add_peer': self.add_peer,
@@ -475,32 +452,6 @@ class ElectrumX(SessionBase):
             'server.peers.subscribe': self.peers_subscribe,
             'server.version': self.server_version,
         }
-
-        if ptuple < (1, 1):
-            # Methods or semantics unique to 1.0 and earlier protocols
-            handlers.update({
-                'blockchain.numblocks.subscribe': self.numblocks_subscribe,
-                'blockchain.utxo.get_address': controller.utxo_get_address,
-                'blockchain.transaction.broadcast':
-                self.transaction_broadcast_1_0,
-                'blockchain.transaction.get': controller.transaction_get_1_0,
-            })
-
-        if ptuple >= (1, 1):
-            # New handlers as of 1.1, or different semantics
-            handlers.update({
-                'blockchain.scripthash.get_balance':
-                controller.scripthash_get_balance,
-                'blockchain.scripthash.get_history':
-                controller.scripthash_get_history,
-                'blockchain.scripthash.get_mempool':
-                controller.scripthash_get_mempool,
-                'blockchain.scripthash.listunspent':
-                controller.scripthash_listunspent,
-                'blockchain.scripthash.subscribe': self.scripthash_subscribe,
-                'blockchain.transaction.broadcast': self.transaction_broadcast,
-                'blockchain.transaction.get': controller.transaction_get,
-            })
 
         if ptuple >= (1, 2):
             # New handler as of 1.2
@@ -541,27 +492,31 @@ class DashElectrumX(ElectrumX):
 
     def set_protocol_handlers(self, ptuple):
         super().set_protocol_handlers(ptuple)
-        mna_broadcast = (self.masternode_announce_broadcast if ptuple >= (1, 1)
-                         else self.masternode_announce_broadcast_1_0)
         self.electrumx_handlers.update({
-            'masternode.announce.broadcast': mna_broadcast,
+            'masternode.announce.broadcast':
+            self.masternode_announce_broadcast,
             'masternode.subscribe': self.masternode_subscribe,
+            'masternode.list': self.masternode_list
         })
+
+    async def notify_masternodes_async(self):
+        for masternode in self.mns:
+            status = await self.daemon.masternode_list(['status', masternode])
+            self.send_notification('masternode.subscribe',
+                                   [masternode, status.get(masternode)])
 
     def notify(self, height, touched):
         '''Notify the client about changes in masternode list.'''
         result = super().notify(height, touched)
-
-        for masternode in self.mns:
-            status = self.daemon.masternode_list(['status', masternode])
-            self.send_notification('masternode.subscribe',
-                                   [masternode, status.get(masternode)])
+        self.controller.create_task(self.notify_masternodes_async())
         return result
 
     # Masternode command handlers
     async def masternode_announce_broadcast(self, signmnb):
         '''Pass through the masternode announce message to be broadcast
-        by the daemon.'''
+        by the daemon.
+
+        signmnb: signed masternode broadcast message.'''
         try:
             return await self.daemon.masternode_broadcast(['relay', signmnb])
         except DaemonError as e:
@@ -571,19 +526,111 @@ class DashElectrumX(ElectrumX):
             raise RPCError(BAD_REQUEST, 'the masternode broadcast was '
                            f'rejected.\n\n{message}\n[{signmnb}]')
 
-    async def masternode_announce_broadcast_1_0(self, signmnb):
-        '''Pass through the masternode announce message to be broadcast
-        by the daemon.'''
-        # An ugly API, like the old Electrum transaction broadcast API
-        try:
-            return await self.masternode_announce_broadcast(signmnb)
-        except RPCError as e:
-            return e.message
+    async def masternode_subscribe(self, collateral):
+        '''Returns the status of masternode.
 
-    async def masternode_subscribe(self, vin):
-        '''Returns the status of masternode.'''
-        result = await self.daemon.masternode_list(['status', vin])
+        collateral: masternode collateral.
+        '''
+        result = await self.daemon.masternode_list(['status', collateral])
         if result is not None:
-            self.mns.add(vin)
-            return result.get(vin)
+            self.mns.add(collateral)
+            return result.get(collateral)
         return None
+
+    async def masternode_list(self, payees):
+        '''
+        Returns the list of masternodes.
+
+        payees: a list of masternode payee addresses.
+        '''
+        if not isinstance(payees, list):
+            raise RPCError(BAD_REQUEST, 'expected a list of payees')
+
+        result = []
+
+        def get_masternode_payment_queue(mns):
+            '''Returns the calculated position in the payment queue for all the
+            valid masterernodes in the given mns list.
+
+            mns: a list of masternodes information.
+            '''
+            now = int(datetime.datetime.utcnow().strftime("%s"))
+            mn_queue = []
+
+            # Only ENABLED masternodes are considered for the list.
+            for line in mns:
+                mnstat = mns[line].split()
+                if mnstat[0] == 'ENABLED':
+                    # if last paid time == 0
+                    if int(mnstat[5]) == 0:
+                        # use active seconds
+                        mnstat.append(int(mnstat[4]))
+                    else:
+                        # now minus last paid
+                        delta = now - int(mnstat[5])
+                        # if > active seconds, use active seconds
+                        if delta >= int(mnstat[4]):
+                            mnstat.append(int(mnstat[4]))
+                        # use active seconds
+                        else:
+                            mnstat.append(delta)
+                    mn_queue.append(mnstat)
+            mn_queue = sorted(mn_queue, key=lambda x: x[8], reverse=True)
+            return mn_queue
+
+        def get_payment_position(payment_queue, address):
+            '''
+            Returns the position of the payment list for the given address.
+
+            payment_queue: position in the payment queue for the masternode.
+            address: masternode payee address.
+            '''
+            position = -1
+            for pos, mn in enumerate(payment_queue, start=1):
+                if mn[2] == address:
+                    position = pos
+                    break
+            return position
+
+        # Accordingly with the masternode payment queue, a custom list
+        # with the masternode information including the payment
+        # position is returned.
+        if (self.controller.cache_mn_height != self.height()
+                or not self.controller.mn_cache):
+            self.controller.cache_mn_height = self.height()
+            self.controller.mn_cache.clear()
+            full_mn_list = await self.daemon.masternode_list(['full'])
+            mn_payment_queue = get_masternode_payment_queue(full_mn_list)
+            mn_payment_count = len(mn_payment_queue)
+            mn_list = []
+            for key, value in full_mn_list.items():
+                mn_data = value.split()
+                mn_info = {}
+                mn_info['vin'] = key
+                mn_info['status'] = mn_data[0]
+                mn_info['protocol'] = mn_data[1]
+                mn_info['payee'] = mn_data[2]
+                mn_info['lastseen'] = mn_data[3]
+                mn_info['activeseconds'] = mn_data[4]
+                mn_info['lastpaidtime'] = mn_data[5]
+                mn_info['lastpaidblock'] = mn_data[6]
+                mn_info['ip'] = mn_data[7]
+                mn_info['paymentposition'] = get_payment_position(
+                    mn_payment_queue, mn_info['payee'])
+                mn_info['inselection'] = (
+                    mn_info['paymentposition'] < mn_payment_count // 10)
+                balance = await self.controller.address_get_balance(
+                    mn_info['payee'])
+                mn_info['balance'] = (sum(balance.values())
+                                      / self.controller.coin.VALUE_PER_COIN)
+                mn_list.append(mn_info)
+            self.controller.mn_cache = mn_list
+
+        # If payees is an empty list the whole masternode list is returned
+        if payees:
+            result = [mn for mn in self.controller.mn_cache
+                      for address in payees if mn['payee'] == address]
+        else:
+            result = self.controller.mn_cache
+
+        return result
