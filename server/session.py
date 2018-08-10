@@ -245,7 +245,7 @@ class ElectrumX(SessionBase):
 
         status = ''.join('{}:{:d}:'.format(hash_to_str(tx_hash), height)
                          for tx_hash, height in history)
-        status += ''.join('{}:{:d}:'.format(hex_hash, -unconfirmed)
+        status += ''.join('{}:{:d}:'.format(hex_hash, unconfirmed)
                           for hex_hash, tx_fee, unconfirmed in mempool)
         if status:
             status = sha256(status.encode()).hex()
